@@ -1,0 +1,46 @@
+@implements IDisposable
+@inject SaveMySpot.Services.ToastService Toasts
+
+<div class="toast-container">
+    @foreach (var toast in orderedToasts)
+    {
+        <div class="toast-card @GetCssClass(toast.Level)">
+            <div class="toast-header">
+                <span class="toast-title">@toast.Title</span>
+                <button type="button" class="toast-close" @onclick="() => Dismiss(toast.Id)">×</button>
+            </div>
+            <div class="toast-body">@toast.Message</div>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyCollection<ToastMessage> orderedToasts = Array.Empty<ToastMessage>();
+
+    protected override void OnInitialized()
+    {
+        Toasts.OnToastsUpdated += HandleToastsUpdated;
+        orderedToasts = Toasts.Toasts.OrderByDescending(t => t.CreatedAt).ToArray();
+    }
+
+    private void HandleToastsUpdated()
+    {
+        orderedToasts = Toasts.Toasts.OrderByDescending(t => t.CreatedAt).ToArray();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Dismiss(Guid id) => Toasts.Dismiss(id);
+
+    private static string GetCssClass(SaveMySpot.Services.ToastLevel level) => level switch
+    {
+        SaveMySpot.Services.ToastLevel.Success => "toast-success",
+        SaveMySpot.Services.ToastLevel.Warning => "toast-warning",
+        SaveMySpot.Services.ToastLevel.Error => "toast-error",
+        _ => "toast-info"
+    };
+
+    public void Dispose()
+    {
+        Toasts.OnToastsUpdated -= HandleToastsUpdated;
+    }
+}

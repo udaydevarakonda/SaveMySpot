@@ -1,0 +1,188 @@
+﻿@page "/"
+
+@using SaveMySpot.Application.Models.MasterData
+@using SaveMySpot.Services
+
+@inject FoodOrdersClient OrdersClient
+@inject ToastService Toasts
+
+<PageTitle>Home</PageTitle>
+
+<h3>Register Meals</h3>
+
+@if (isLoadingMasterData)
+{
+	<p>Loading options...</p>
+}
+else if (loadError)
+{
+	<p class="text-danger">Failed to load options. Please refresh.</p>
+}
+else
+{
+	<EditForm Model="request" OnValidSubmit="RegisterAsync">
+		<DataAnnotationsValidator />
+		<ValidationSummary />
+
+		<div class="row g-3">
+			<div class="col-md-6">
+				<label class="form-label">Your Name</label>
+				<InputText class="form-control" @bind-Value="request.CustomerName" />
+			</div>
+			<div class="col-md-6">
+				<label class="form-label">Location</label>
+				<InputSelect class="form-select" @bind-Value="selectedLocationId" @bind-Value:after="UpdatePrice">
+					@foreach (var loc in masterData?.Locations ?? Array.Empty<LookupItemDto>())
+					{
+						<option value="@loc.Id">@loc.Name</option>
+					}
+				</InputSelect>
+			</div>
+			<div class="col-md-3">
+				<label class="form-label">Meal Type</label>
+				<InputSelect class="form-select" @bind-Value="selectedMealTypeId" @bind-Value:after="UpdatePrice">
+					@foreach (var type in masterData?.MealTypes ?? Array.Empty<LookupItemDto>())
+					{
+						<option value="@type.Id">@type.Name</option>
+					}
+				</InputSelect>
+			</div>
+			<div class="col-md-3">
+				<label class="form-label">Preference</label>
+				<InputSelect class="form-select" @bind-Value="selectedPreferenceId" @bind-Value:after="UpdatePrice">
+					@foreach (var option in masterData?.MealPreferences ?? Array.Empty<LookupItemDto>())
+					{
+						<option value="@option.Id">@option.Name</option>
+					}
+				</InputSelect>
+			</div>
+			<div class="col-md-3">
+				<label class="form-label">Start Date</label>
+				<InputDate class="form-control" @bind-Value="request.StartDate" />
+			</div>
+			<div class="col-md-3">
+				<label class="form-label">End Date (optional)</label>
+				<InputDate class="form-control" @bind-Value="rangeEnd" />
+			</div>
+			<div class="col-md-3">
+				<label class="form-label">Price</label>
+				<InputNumber class="form-control" @bind-Value="request.Price" step="0.01" disabled />
+			</div>
+		</div>
+
+		<div class="mt-3 d-flex gap-2">
+			<button class="btn btn-primary" type="submit" disabled="@isSubmitting">Register</button>
+		</div>
+
+	</EditForm>
+}
+
+@code {
+	private readonly CreateFoodOrderRequest request = new()
+	{
+		CustomerName = "",
+		Location = "",
+		MealType = MealType.Lunch,
+		MealOption = MealOption.Veg,
+		StartDate = DateOnly.FromDateTime(DateTime.Today),
+		Price = 0
+	};
+
+	private MasterDataDto? masterData;
+	private long selectedLocationId;
+	private long selectedMealTypeId;
+	private long selectedPreferenceId;
+
+	private DateOnly? rangeEnd;
+	private bool isSubmitting;
+	private bool isLoadingMasterData = true;
+	private bool loadError;
+	private List<FoodOrderDto> createdOrders = new();
+
+	protected override async Task OnInitializedAsync()
+	{
+		try
+		{
+			masterData = await OrdersClient.GetMasterDataAsync();
+			if (masterData is null)
+			{
+				loadError = true;
+				return;
+			}
+
+        selectedLocationId = masterData.Locations.FirstOrDefault()?.Id ?? 0;
+		selectedMealTypeId = masterData.MealTypes.FirstOrDefault()?.Id ?? 0;
+		selectedPreferenceId = masterData.MealPreferences.FirstOrDefault()?.Id ?? 0;
+
+			ApplySelectionToRequest();
+		}
+		catch
+		{
+			loadError = true;
+		}
+		finally
+		{
+			isLoadingMasterData = false;
+		}
+	}
+
+	private async Task RegisterAsync()
+	{
+		isSubmitting = true;
+
+		try
+		{
+			request.EndDate = rangeEnd;
+			createdOrders = await OrdersClient.RegisterRangeAsync(request);
+			Toasts.ShowSuccess($"Registered {createdOrders.Count} meal(s).", "Meals registered");
+		}
+		catch (Exception ex)
+		{
+			Toasts.ShowError(ex.Message, "Registration failed");
+		}
+		finally
+		{
+			isSubmitting = false;
+		}
+	}
+
+	private void UpdatePrice()
+	{
+		ApplySelectionToRequest();
+	}
+
+	private void ApplySelectionToRequest()
+	{
+		if (masterData is null)
+		{
+			return;
+		}
+
+		var location = masterData.Locations.FirstOrDefault(l => l.Id == selectedLocationId) ?? masterData.Locations.First();
+		var mealType = masterData.MealTypes.FirstOrDefault(m => m.Id == selectedMealTypeId) ?? masterData.MealTypes.First();
+		var preference = masterData.MealPreferences.FirstOrDefault(p => p.Id == selectedPreferenceId) ?? masterData.MealPreferences.First();
+
+		selectedLocationId = location.Id;
+		selectedMealTypeId = mealType.Id;
+		selectedPreferenceId = preference.Id;
+
+		request.Location = location.Name;
+		request.MealType = ParseMealType(mealType.Name);
+		request.MealOption = ParseMealOption(preference.Name);
+
+		var price = masterData.Prices.FirstOrDefault(p => p.LocationId == selectedLocationId &&
+			p.MealTypeId == selectedMealTypeId &&
+			p.MealPreferenceId == selectedPreferenceId)?.Price;
+		request.Price = price ?? 0;
+	}
+
+	private static MealType ParseMealType(string name)
+	{
+		return Enum.TryParse<MealType>(name, true, out var result) ? result : MealType.Lunch;
+	}
+
+	private static MealOption ParseMealOption(string name)
+	{
+		return Enum.TryParse<MealOption>(name, true, out var result) ? result : MealOption.Veg;
+	}
+}
